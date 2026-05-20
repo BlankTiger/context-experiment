@@ -1,3 +1,4 @@
+#include "arena.hh"
 #include "context.hh"
 #include <print>
 #include <thread>
@@ -11,9 +12,12 @@ void print_thread_info() {
                static_cast<void*>(&context.allocator));
 }
 
+Arena arena;
+const auto arena_allocator = arena.allocator();
+
 void using_temp() {
     thread_id = 3;
-    PushAllocator(temp_allocator);
+    PushAllocator(arena_allocator);
 
     for (size_t i{0}; i < MAX_ITERATIONS; ++i) {
         print_thread_info();
@@ -32,6 +36,7 @@ void using_default() {
 }
 
 int main() {
+
     thread_id = 1;
 
     print_thread_info();
