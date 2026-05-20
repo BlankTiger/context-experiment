@@ -21,7 +21,11 @@ void using_temp() {
 
     for (size_t i{0}; i < MAX_ITERATIONS; ++i) {
         print_thread_info();
+        std::print("memory left: {}\n", arena.space_left());
         std::vector v{1, 2, 3};
+
+        if (i % 5 == 0)
+            arena.reset();
     }
 }
 
@@ -36,15 +40,11 @@ void using_default() {
 }
 
 int main() {
-
     thread_id = 1;
-
     print_thread_info();
-    std::jthread t1(using_temp);
-    std::jthread t2(using_default);
 
+    std::jthread t1(using_temp);
     t1.join();
-    t2.join();
 
     print_thread_info();
 
