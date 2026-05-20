@@ -1,41 +1,56 @@
-#pragma(once)
+#pragma once
 
 #include <cstdlib>
 #include <new>
 #include <print>
 
 struct Allocator {
-    void* (*alloc)(std::size_t size);
-    void (*free)(void* pointer);
+    void* (*alloc)(void* data, std::size_t size, std::size_t alignment);
+    void (*free)(void* data, void* pointer, std::size_t alignment);
+
+    void* data;
 };
 
+static constexpr std::size_t DEFAULT_ALIGNMENT = alignof(std::max_align_t);
+
 Allocator default_allocator = {
-    .alloc = [](std::size_t size) -> void* { return std::malloc(size); },
-    .free = [](void* pointer) { std::free(pointer); },
+    .alloc = [](void*, std::size_t size, std::size_t alignment) -> void* {
+        if (alignment <= DEFAULT_ALIGNMENT)
+            return std::malloc(size);
+        return std::aligned_alloc(alignment, size);
+    },
+    .free = [](void*, void* pointer, std::size_t) { std::free(pointer); },
+    .data = nullptr,
 };
 
 Allocator logging_default_allocator = {
-    .alloc = [](std::size_t size) -> void* {
-        std::print("default alloc: {}\n", size);
-        return std::malloc(size);
+    .alloc = [](void*, std::size_t size, std::size_t alignment) -> void* {
+        std::print("default alloc: {} align: {}\n", size, alignment);
+        if (alignment <= DEFAULT_ALIGNMENT)
+            return std::malloc(size);
+        return std::aligned_alloc(alignment, size);
     },
     .free =
-        [](void* pointer) {
+        [](void*, void* pointer, std::size_t) {
             std::print("default free: {}\n", pointer);
             std::free(pointer);
         },
+    .data = nullptr,
 };
 
 Allocator temp_allocator = {
-    .alloc = [](std::size_t size) -> void* {
-        std::print("temp alloc: {}\n", size);
-        return std::malloc(size);
+    .alloc = [](void*, std::size_t size, std::size_t alignment) -> void* {
+        std::print("temp alloc: {} align: {}\n", size, alignment);
+        if (alignment <= DEFAULT_ALIGNMENT)
+            return std::malloc(size);
+        return std::aligned_alloc(alignment, size);
     },
     .free =
-        [](void* pointer) {
+        [](void*, void* pointer, std::size_t) {
             std::print("temp free: {}\n", pointer);
             std::free(pointer);
         },
+    .data = nullptr,
 };
 
 struct Context {
@@ -59,33 +74,68 @@ struct Allocator_Scope {
 
 #define PushAllocator(a) Allocator_Scope _alloc_scope_##__LINE__(a)
 
-void* operator new(std::size_t sz) {
-    void* pointer = context.allocator.alloc(sz);
+void* operator new(std::size_t size) {
+    if (size == 0)
+        size = 1;
+    void* pointer = context.allocator.alloc(context.allocator.data, size,
+                                            DEFAULT_ALIGNMENT);
     if (!pointer)
         throw std::bad_alloc{};
     return pointer;
 }
 
-void* operator new[](std::size_t sz) { return ::operator new(sz); }
+void* operator new[](std::size_t size) { return ::operator new(size); }
 
-void* operator new(std::size_t sz, const std::nothrow_t&) noexcept {
+void* operator new(std::size_t size, const std::nothrow_t&) noexcept {
     try {
-        return ::operator new(sz);
+        return ::operator new(size);
     } catch (...) {
         return nullptr;
     }
 }
 
-void* operator new[](std::size_t sz, const std::nothrow_t&) noexcept {
+void* operator new[](std::size_t size, const std::nothrow_t&) noexcept {
     try {
-        return ::operator new[](sz);
+        return ::operator new[](size);
+    } catch (...) {
+        return nullptr;
+    }
+}
+
+void* operator new(std::size_t size, std::align_val_t al) {
+    if (size == 0)
+        size = 1;
+    void* pointer = context.allocator.alloc(context.allocator.data, size,
+                                            static_cast<std::size_t>(al));
+    if (!pointer)
+        throw std::bad_alloc{};
+    return pointer;
+}
+
+void* operator new[](std::size_t size, std::align_val_t al) {
+    return ::operator new(size, al);
+}
+
+void* operator new(std::size_t size, std::align_val_t al,
+                   const std::nothrow_t&) noexcept {
+    try {
+        return ::operator new(size, al);
+    } catch (...) {
+        return nullptr;
+    }
+}
+
+void* operator new[](std::size_t size, std::align_val_t al,
+                     const std::nothrow_t&) noexcept {
+    try {
+        return ::operator new[](size, al);
     } catch (...) {
         return nullptr;
     }
 }
 
 void operator delete(void* pointer) noexcept {
-    context.allocator.free(pointer);
+    context.allocator.free(context.allocator.data, pointer, DEFAULT_ALIGNMENT);
 }
 
 void operator delete[](void* pointer) noexcept { ::operator delete(pointer); }
@@ -98,11 +148,38 @@ void operator delete[](void* pointer, const std::nothrow_t&) noexcept {
     ::operator delete[](pointer);
 }
 
-// C++14: sized deallocation
 void operator delete(void* pointer, std::size_t) noexcept {
     ::operator delete(pointer);
 }
 
 void operator delete[](void* pointer, std::size_t) noexcept {
     ::operator delete[](pointer);
+}
+
+void operator delete(void* pointer, std::align_val_t al) noexcept {
+    context.allocator.free(context.allocator.data, pointer,
+                           static_cast<std::size_t>(al));
+}
+
+void operator delete[](void* pointer, std::align_val_t al) noexcept {
+    ::operator delete(pointer, al);
+}
+
+void operator delete(void* pointer, std::size_t, std::align_val_t al) noexcept {
+    ::operator delete(pointer, al);
+}
+
+void operator delete[](void* pointer, std::size_t,
+                       std::align_val_t al) noexcept {
+    ::operator delete(pointer, al);
+}
+
+void operator delete(void* pointer, const std::nothrow_t&,
+                     std::align_val_t al) noexcept {
+    ::operator delete(pointer, al);
+}
+
+void operator delete[](void* pointer, const std::nothrow_t&,
+                       std::align_val_t al) noexcept {
+    ::operator delete(pointer, al);
 }
