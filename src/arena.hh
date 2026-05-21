@@ -2,9 +2,12 @@
 
 #include "allocator.hh"
 #include <cassert>
+#include <cstring>
+#include <print>
 
 const size_t DEFAULT_RESERVE_SIZE = 256 * 1024 * 1024;
 
+template <bool DEBUG = false>
 struct Arena {
     std::byte* memory_base;
     std::byte* current_point;
@@ -29,10 +32,20 @@ struct Arena {
         };
     };
 
-    void reset() { current_point = memory_base; };
-    size_t space_left() { return address_limit - current_point; }
+    void reset() {
+        if constexpr (DEBUG) {
+            const auto STAMP = 0xCC;
+            std::memset(memory_base, STAMP, current_point - memory_base);
+        }
+        current_point = memory_base;
+    };
+
+    size_t bytes_left() {
+        return address_limit - current_point;
+    }
 
     static void* alloc(void* data, std::size_t size, std::size_t alignment) {
+        std::print("hey chat\n");
         auto* arena = static_cast<Arena*>(data);
         auto* old_point = arena->current_point;
         // @TODO: Unpacked allocations because of alignment.
